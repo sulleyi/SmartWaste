@@ -1,5 +1,4 @@
 #include <ArduinoJson.h>
-
 #include <SPI.h>
 #include <WiFi101.h>
 #include <RBD_Timer.h>
@@ -7,29 +6,31 @@
 #include <Scheduler.h>
 #include <ArduinoHttpClient.h>
 
-#include "arduino_secrets.h" 
+#include "arduino_secrets.h"
 //enter sensitive data in the arduino_secrets.h
 char ssid[] = SECRET_SSID;        // your network SSID (name)
 char pass[] = SECRET_PASS;    // your network password (use for WPA, or use as key for WEP)
 int keyIndex = 0;            // your network key Index number (needed only for WEP)
-int port = 443;
+
 
 // AWS API INFO
-char apiKey[] = SECRET_APIKEY; 
-char server[] = "cqdup0la3c.execute-api.us-east-2.amazonaws.com";
-char path[] = "/Phase3Test";
-
+char apiKey[] = SECRET_APIKEY;
+char HOST_NAME[] = "cqdup0la3c.execute-api.us-east-2.amazonaws.com";
+String PATH_NAME = "/Phase3Test/";
+int HTTP_PORT = 443;
+String HTTP_METHOD = "POST";
+String queryString = "?requestId=300&countActuations=9&state=Full";
 
 // Initialize the Ethernet client library
 // with the IP address and port of the server
 // that you want to connect to (port 80 is default for HTTP):
-WiFiSSLClient wifi;
-HttpClient client = HttpClient(wifi, server, port);
+WiFiSSLClient client;
+//HttpClient client = HttpClient(wifi, server, port);
 
 int status = WL_IDLE_STATUS;
 
 
-// Local Sensing 
+// Local Sensing
 
 #define SENSORPIN 11
 #define PIN_LED_12 12
@@ -45,7 +46,7 @@ int angle = 0;
 
 // variables will change:
 int requestId;
-int sensorState = 0, lastState=0, activationCount=0;
+int sensorState = 0, lastState = 0, activationCount = 0;
 bool isFull = false;
 bool compressed = false;
 
@@ -58,8 +59,8 @@ void setup() {
   }
 
   //Configure pins for Adafruit ATWINC1500 Feather
-  WiFi.setPins(8,7,4,2);
-  
+  WiFi.setPins(8, 7, 4, 2);
+
   // check for the presence of the shield:
   if (WiFi.status() == WL_NO_SHIELD) {
     Serial.println("WiFi shield not present");
@@ -77,19 +78,52 @@ void setup() {
   }
   Serial.println("Connected to wifi");
   printWiFiStatus();
-
-  Scheduler.startLoop(loop2);
 }
 
 void loop() {
   pollState();
   delay(5000);
-}
 
-void loop2(){
-  String json = postBody(requestId, activationCount, isFull);
-  postRequest(json);
-  delay(10000);
+  String requestBody = postBody(requestId, activationCount, isFull);
+
+
+  // connect to web server
+  if (client.connect(HOST_NAME, HTTP_PORT)) {
+    // if connected:
+    Serial.println("Connected to server");
+    // make a HTTP request:
+    // send HTTP header
+    
+    client.println(F("POST /Phase3Test HTTP/1.1"));
+    client.println(F("Content-Type: application/json"));
+    client.println("Content-Length: " + String(requestBody.length()));
+    client.println(F("Host: cqdup0la3c.execute-api.us-east-2.amazonaws.com"));
+    client.println(F("x-api-key: UXEUtFmYBz1Eb3dNF8skj3iQWkdeOYlS2uYLlqnl"));
+    client.println(); // end HTTP header
+    // send HTTP body
+    client.println(requestBody);
+
+    Serial.println(requestBody);
+
+    while (client.connected()) {
+      if (client.available()) {
+        // read an incoming byte from the server and print it to serial monitor:
+        char c = client.read();
+        Serial.print(c);
+      }
+    }
+
+    // the server's disconnected, stop the client:
+    client.stop();
+    Serial.println();
+    Serial.println("disconnected");
+  } else {// if not connected:
+    Serial.println("connection failed");
+  }
+
+  while(true){
+    //continues forever
+    }
 }
 
 void printWiFiStatus() {
@@ -111,32 +145,34 @@ void printWiFiStatus() {
 
 
 // Create JSON POST Body
-String postBody(int requestId, int countActuations, bool state){
+String postBody(int requestId, int countActuations, bool state) {
 
   Serial.println("Generating JSON Document");
-   //TODO: EDIT JSON REQUEST STRING
+  //TODO: EDIT JSON REQUEST STRING
   const int capacity = JSON_OBJECT_SIZE(3);
-  
-  DynamicJsonDocument doc(capacity);
-  
+
+  StaticJsonDocument<capacity> doc;
+
   doc["requestId"].set(requestId);
   doc["countActuations"].set(countActuations);
   doc["state"].set(state);
-  
+
   String json;
 
   serializeJson(doc, json);
   return json;
 }
 
-void postRequest(String json){
+/*
+
+  void postRequest(String json){
   Serial.println("making POST request");
   String contentType = "application/json";
   String postData = json;
-  
+
   Serial.print("POST Data: ");
   Serial.println(json);
-  
+
   client.beginRequest();
   client.post(path);
   client.sendHeader("Content-Type", contentType);
@@ -158,10 +194,11 @@ void postRequest(String json){
 
   Serial.println("Wait five seconds");
   delay(5000);
-}
+  }
+*/
 
-void pollState(){
-    while(!isFull){
+void pollState() {
+  while (!isFull) {
     // read the state of the pushbutton value:
     sensorState = digitalRead(SENSORPIN);
     // turn LED off:
@@ -170,24 +207,24 @@ void pollState(){
 
     // check if the sensor beam is broken
     // if it is, the sensorState is LOW:
-    if (sensorState == LOW) { 
+    if (sensorState == LOW) {
       activationCount += 1;
       // turn LED on:
       digitalWrite(PIN_LED_13, HIGH);
-      digitalWrite(PIN_LED_12, LOW);  
+      digitalWrite(PIN_LED_12, LOW);
 
       delay(1000);
-      if(sensorState == LOW && !compressed){
+      if (sensorState == LOW && !compressed) {
         myservo.write(90);
         delay(1000);
         myservo.write(0);
         delay(1000);
         compressed == true;
         delay(1000);
-        if(sensorState  == LOW){
+        if (sensorState  == LOW) {
           isFull = true;
         }
-        else{
+        else {
           compressed = false;
         }
       }
@@ -195,17 +232,17 @@ void pollState(){
     break;
   }
 
-  while(isFull){
-    
+  while (isFull) {
+
     digitalWrite(PIN_LED_13, HIGH);
     digitalWrite(PIN_LED_12, LOW);
 
     // read the state of the pushbutton value:
     sensorState = digitalRead(SENSORPIN);
 
-    if(sensorState == HIGH){
+    if (sensorState == HIGH) {
       compressed == false;
-      isFull == false;   
+      isFull == false;
     }
     break;
   }
